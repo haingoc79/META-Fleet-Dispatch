@@ -2,27 +2,49 @@
 
 Ngày: 2026-10-07
 
-## Trạng thái production
+## Production
 
 - GitHub Source of Truth: `haingoc79/META-Fleet-Dispatch`.
 - Runtime: Cloudflare Workers + Static Assets + D1 + Cloudflare Access.
-- Worker: `meta-fleet-dispatch`.
-- D1 production: `meta-fleet-dispatch-prod`.
-- Custom domain: `https://giaohang.meta.shopping`.
-- GitHub CI: PASS.
-- Cloudflare build/deploy: PASS.
-- Production Worker version: `acb6d069-24e0-4d5e-9199-a02e065462a8`.
-- Cloudflare Access: PASS — All traffic, Allow email domain `@meta.vn`.
-- Session duration: 24 hours.
-- Admin/Dispatcher verified live: `ngochai@meta.vn`.
-- Configured Admin/Dispatcher: `ducthang@meta.vn`, `anhtuan@meta.vn`, `ngochai@meta.vn`, `bichthuy@meta.vn`.
-- Other `@meta.vn`: Viewer by Worker RBAC; UI read-only. Live viewer negative-write test chưa chạy.
-- `/healthz`: PASS.
-- D1 hiện trống: 0 orders trước production import.
-- Workbook thật: CHƯA NẠP.
-- Production shadow dispatch: CHƯA CHẠY.
-- Chưa PILOT READY.
+- Domain: `https://giaohang.meta.shopping`.
+- D1: `meta-fleet-dispatch-prod`.
+- Access: `@meta.vn` được vào; 4 Admin/Dispatcher được phép ghi, các tài khoản còn lại Viewer.
+- Workbook production đã nạp.
+- UI đang có 401 đơn, 44 nhân sự; tên sản phẩm được hiển thị ở bảng đơn và từng stop.
+- COD bắt buộc cho mọi đơn; amount hiện derived từ UnitCost.
 
-## Bước kế tiếp
+## Dispatch hiện tại
 
-Nạp workbook ngày 2026-10-07 bằng tài khoản Admin, kiểm import counts/COD/data-quality, sau đó chạy shadow dispatch production và acceptance.
+- Latest legacy/shadow result: 378 đơn / 75 chuyến / 33 nhân sự có proposal.
+- Kết quả trên là `heuristic` cũ, CHƯA dùng đường bộ thật và không được coi là route plan cuối.
+- Đã quan sát tuyến ngược/xa trong heuristic cũ; ví dụ có route ghép nhiều quận/huyện không hợp lý.
+
+## Map-aware routing
+
+Đã deploy code:
+- tab **Bản đồ & tuyến**;
+- Google Maps provider abstraction;
+- geocode batch theo ngày;
+- spatial clustering theo tọa độ + hướng so với depot;
+- outlier review theo planning radius;
+- Google Routes Compute Route Matrix theo từng trip;
+- TWO_WHEELER cho xe máy, DRIVE cho ô tô; fallback được audit;
+- nearest-neighbor + 2-opt stop sequence trên road-time matrix;
+- route jobs chạy batch để tránh subrequest burst;
+- khoảng cách/phút mỗi chặng hiển thị ở Kết quả phân đơn;
+- geocode cache TTL 24h;
+- regression test map-routing PASS.
+
+Production map status hiện tại:
+- provider: `google_maps_platform`
+- eligible orders: 382
+- geocoded: 0
+- failed: 0
+- `GOOGLE_MAPS_API_KEY`: chưa cấu hình
+- HCM depot: chưa cấu hình
+- Hà Nội depot: chưa cấu hình
+- routeReady: false
+
+## Chưa PILOT READY
+
+Map-aware production run chưa thể chạy cho tới khi key và 2 depot được cấu hình, sau đó phải kiểm geocode, map run, route quality và acceptance.
