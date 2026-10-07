@@ -48,12 +48,23 @@ function activeCache(row){const exp=row?.expires_at||row?.geocode_expires_at;ret
 async function googleGeocode(apiKey,address){
   const q=encodeURIComponent(String(address||'').trim()+', Việt Nam');
   const res=await fetch(`https://geocode.googleapis.com/v4/geocode/address/${q}?languageCode=vi&regionCode=vn`,{headers:{'X-Goog-Api-Key':apiKey,'X-Goog-FieldMask':'results.placeId,results.location,results.granularity'}});
-  if(!res.ok)throw new Error(`GEOCODE_API_${res.status}:${(await res.text()).slice(0,220)}`);
+  if(!res.ok)throw new Error(`GEOCODE_API_${res.status}:${(await res.text()).slice(0,2000)}`);
   const body=await res.json(),x=body?.results?.[0];
   if(!x?.placeId||x?.location?.latitude==null||x?.location?.longitude==null)throw new Error('GEOCODE_NO_RESULT');
   return {placeId:x.placeId,lat:Number(x.location.latitude),lng:Number(x.location.longitude),granularity:x.granularity||null};
 }
 async function getMapConfig(env){const r=await env.DB.prepare('SELECT * FROM map_config ORDER BY branch').all();return r.results||[];}
+
+
+async function providerDiagnostic(env){
+  const apiKey=mapsKey(env),s=await loadState(env);
+  const sample=s.orders.find(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát')||s.orders[0];
+  if(!sample)throw Object.assign(new Error('NO_ORDER_SAMPLE'),{status:404});
+  const q=encodeURIComponent(String(sample.full_address||'').trim()+', Việt Nam');
+  const res=await fetch(`https://geocode.googleapis.com/v4/geocode/address/${q}?languageCode=vi&regionCode=vn`,{headers:{'X-Goog-Api-Key':apiKey,'X-Goog-FieldMask':'results.placeId,results.location,results.granularity'}});
+  const body=await res.text();
+  return {httpStatus:res.status,ok:res.ok,orderId:sample.id,branch:sample.branch,response:body.slice(0,4000)};
+}
 
 async function mapDiagnostics(env){
   const s=await loadState(env),serviceDate=s.orders[0]?.service_date||null,omap=new Map(s.orders.map(o=>[Number(o.id),o]));
@@ -239,6 +250,7 @@ export default {async fetch(request,env){
       if(request.method==='GET'&&u.pathname==='/api/bootstrap') return json(await bootstrap(env,user));
       if(request.method==='GET'&&u.pathname==='/api/map/status') return json(await mapStatus(env));
       if(request.method==='GET'&&u.pathname==='/api/map/diagnostics'){requireAdmin(user);return json(await mapDiagnostics(env));}
+      if(request.method==='GET'&&u.pathname==='/api/map/provider-diagnostic'){requireAdmin(user);return json(await providerDiagnostic(env));}
       if(request.method==='POST'&&u.pathname==='/api/import/workbook'){requireAdmin(user);return json(await importWorkbook(env,user.email,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/config'){requireAdmin(user);return json(await saveMapConfig(env,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/geocode-step'){requireAdmin(user);return json(await geocodeStep(env));}
