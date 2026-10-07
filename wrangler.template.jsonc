@@ -23,6 +23,8 @@
     }
   ],
   "vars": {
-    "MFD_ALLOW_UNAUTHENTICATED": "false"
+    "MFD_ALLOW_UNAUTHENTICATED": "false",
+    "MFD_VIEWER_DOMAIN": "meta.vn",
+    "MFD_ADMIN_EMAILS": "ducthang@meta.vn,anhtuan@meta.vn,ngochai@meta.vn,bichthuy@meta.vn"
   }
 }
