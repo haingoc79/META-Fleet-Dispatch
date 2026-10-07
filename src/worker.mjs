@@ -54,6 +54,23 @@ async function googleGeocode(apiKey,address){
   return {placeId:x.placeId,lat:Number(x.location.latitude),lng:Number(x.location.longitude),granularity:x.granularity||null};
 }
 async function getMapConfig(env){const r=await env.DB.prepare('SELECT * FROM map_config ORDER BY branch').all();return r.results||[];}
+
+async function mapDiagnostics(env){
+  const s=await loadState(env),serviceDate=s.orders[0]?.service_date||null,omap=new Map(s.orders.map(o=>[Number(o.id),o]));
+  if(!serviceDate)return {serviceDate:null,errorGroups:[],samples:[]};
+  const rows=await env.DB.prepare(`SELECT order_id,geocode_status,error_text,fetched_at,expires_at FROM order_geocodes WHERE service_date=? AND geocode_status!='ok' ORDER BY fetched_at DESC`).bind(serviceDate).all();
+  const groups=new Map(),samples=[];
+  for(const r of rows.results||[]){
+    const raw=String(r.error_text||'UNKNOWN'),key=raw.split(':')[0].slice(0,80);
+    groups.set(key,(groups.get(key)||0)+1);
+    if(samples.length<30){
+      const o=omap.get(Number(r.order_id));
+      samples.push({orderId:Number(r.order_id),branch:o?.branch||null,address:o?.full_address||null,district:o?.district||null,error:raw});
+    }
+  }
+  return {serviceDate,totalFailed:(rows.results||[]).length,errorGroups:[...groups.entries()].map(([error,count])=>({error,count})).sort((a,b)=>b.count-a.count),samples};
+}
+
 async function mapStatus(env){
   const s=await loadState(env),configs=await getMapConfig(env),nowIso=now(),serviceDate=s.orders[0]?.service_date||null;
   const eligible=s.orders.filter(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát');
@@ -198,6 +215,7 @@ export default {async fetch(request,env){
       const user=accessContext(request,env);
       if(request.method==='GET'&&u.pathname==='/api/bootstrap') return json(await bootstrap(env,user));
       if(request.method==='GET'&&u.pathname==='/api/map/status') return json(await mapStatus(env));
+      if(request.method==='GET'&&u.pathname==='/api/map/diagnostics'){requireAdmin(user);return json(await mapDiagnostics(env));}
       if(request.method==='POST'&&u.pathname==='/api/import/workbook'){requireAdmin(user);return json(await importWorkbook(env,user.email,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/config'){requireAdmin(user);return json(await saveMapConfig(env,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/geocode-step'){requireAdmin(user);return json(await geocodeStep(env));}
