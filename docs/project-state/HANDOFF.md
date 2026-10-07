@@ -1,24 +1,23 @@
 # HANDOFF
 
-Production Worker đã deploy thành công tại `giaohang.meta.shopping`.
+Production Worker và Cloudflare Access đã hoạt động.
 
 ## Đã xác minh
 
-- Build command `npm run build`: PASS.
-- Deploy command `npx wrangler deploy`: PASS.
-- D1 binding `env.DB -> meta-fleet-dispatch-prod`: PASS.
-- Custom domain trigger: PASS.
-- `/healthz`: PASS.
-- Unauthenticated API data request: blocked with `ACCESS_REQUIRED`.
+- `giaohang.meta.shopping`: live.
+- D1 binding: PASS.
+- Cloudflare Access: All traffic, email domain `@meta.vn`.
+- `ngochai@meta.vn`: Admin/Dispatcher live.
+- Backend RBAC và read-only Viewer UI đã deploy.
+- D1 đang có 0 đơn trước import.
 
 ## Bước kế tiếp
 
-1. Worker → tab Access → **Protect this Worker behind Access**.
-2. Tạo Allow policy chỉ cho người dùng/nhóm nội bộ được phép.
-3. Kiểm domain yêu cầu đăng nhập Cloudflare Access.
-4. Sau khi Access PASS: nạp workbook thật qua tab Nạp dữ liệu.
-5. Chạy Gợi ý phân bổ.
-6. Kiểm Kết quả phân đơn theo nhân sự/chuyến/stop/COD.
-7. Chạy acceptance production và rehearsal fallback.
+1. Đăng nhập bằng một tài khoản Admin/Dispatcher.
+2. Tab **Nạp dữ liệu** → chọn workbook vận hành ngày 2026-10-07 → **Nạp vào D1**.
+3. Kiểm kết quả import phải phản ánh đúng số đơn/driver/data-quality.
+4. Chạy **Gợi ý phân bổ**.
+5. Kiểm **Kết quả phân đơn** theo nhân sự → chuyến → stop → order → COD.
+6. Chạy production acceptance và pilot rehearsal.
 
 Không commit workbook hoặc dữ liệu khách hàng vào GitHub.
