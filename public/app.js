@@ -82,7 +82,7 @@ function applyRoleUi(){
   const canWrite=state.currentUser?.canWrite===true;
   $('#proposal').style.display=canWrite?'':'none';$('#refreshPlan').style.display=canWrite?'':'none';
   const importTab=document.querySelector('[data-tab="import"]');if(importTab)importTab.style.display=canWrite?'':'none';
-  for(const id of ['saveDepots','geocodeBtn','mapProposalBtn']){const el=$('#'+id);if(el)el.style.display=canWrite?'':'none';}
+  for(const id of ['saveDepots','geocodeBtn','retryQuotaBtn','mapProposalBtn']){const el=$('#'+id);if(el)el.style.display=canWrite?'':'none';}
   $('#mode').textContent=state.currentUser?`${state.currentUser.email} · ${state.currentUser.role==='admin'?'Admin/Dispatcher':'Viewer'}`:'D1 online';
 }
 function renderMap(){
@@ -90,9 +90,10 @@ function renderMap(){
   if(document.activeElement!==$('#hcmDepot'))$('#hcmDepot').value=hcm?.address||'';
   if(document.activeElement!==$('#hnDepot'))$('#hnDepot').value=hn?.address||'';
   const depReady=depots.filter(x=>x.geocoded).length;
-  $('#mapStatus').innerHTML=[kpi('Google API',s.apiConfigured?'Đã cấu hình':'Thiếu key'),kpi('Depot geocode',`${depReady}/2`),kpi('Đơn geocode',`${s.geocodedOrders||0}/${s.eligibleOrders||0}`),kpi('Geocode lỗi',s.failedOrders||0),kpi('Route-ready',s.routeReady?'Có':'Chưa')].join('');
+  $('#mapStatus').innerHTML=[kpi('Google API',s.apiConfigured?'Đã cấu hình':'Thiếu key'),kpi('Depot geocode',`${depReady}/2`),kpi('Đơn geocode',`${s.geocodedOrders||0}/${s.eligibleOrders||0}`),kpi('Quota blocked',s.quotaBlockedOrders||0),kpi('Lỗi địa chỉ khác',Math.max(0,(s.failedOrders||0)-(s.quotaBlockedOrders||0))),kpi('Route-ready',s.routeReady?'Có':'Chưa')].join('');
   $('#mapBadge').textContent=s.routeReady?'Sẵn sàng tối ưu':'Chưa sẵn sàng';$('#mapBadge').className='badge '+(s.routeReady?'good':'warn');
   if(!s.apiConfigured)$('#mapProgress').textContent='Thiếu Cloudflare Secret GOOGLE_MAPS_API_KEY. Code đã sẵn sàng nhưng chưa gọi dữ liệu bản đồ.';
+  else if((s.quotaBlockedOrders||0)>0)$('#mapProgress').textContent=`Google Geocoding đang bị daily quota: ${s.quotaBlockedOrders} đơn bị block. Tăng quota rồi bấm Retry đơn bị quota.`;
 }
 async function refreshMap(){state.mapStatus=await api('/api/map/status');renderMap();return state.mapStatus;}
 async function refresh(){
@@ -104,6 +105,18 @@ async function saveDepots(){
   const hcmDepot=$('#hcmDepot').value.trim(),hnDepot=$('#hnDepot').value.trim();if(!hcmDepot||!hnDepot)return alert('Cần nhập chính xác cả điểm xuất phát HCM và Hà Nội.');
   try{$('#saveDepots').disabled=true;await api('/api/map/config',{method:'POST',body:JSON.stringify({hcmDepot,hnDepot})});$('#mapProgress').textContent='Đã lưu depot. Tiếp theo: Chuẩn hóa địa chỉ.';await refreshMap();}catch(e){alert(e.message)}finally{$('#saveDepots').disabled=false;}
 }
+async function retryQuota(){
+  if(!state.currentUser?.canWrite)return;
+  try{
+    $('#retryQuotaBtn').disabled=true;
+    const before=await refreshMap();
+    if(!(before.quotaBlockedOrders>0))return alert('Không còn đơn nào bị quota.');
+    const reset=await api('/api/map/retry-quota',{method:'POST',body:'{}'});
+    $('#mapProgress').textContent=`Đã reset ${reset.reset} đơn bị quota. Đang geocode lại…`;
+    await geocodeAll();
+  }catch(e){$('#mapProgress').textContent='Retry quota lỗi: '+e.message;}finally{$('#retryQuotaBtn').disabled=false;}
+}
+
 async function geocodeAll(){
   if(!state.currentUser?.canWrite)return;try{
     $('#geocodeBtn').disabled=true;let loops=0,s=await refreshMap();if(!s.apiConfigured)throw new Error('MAPS_API_KEY_MISSING');
@@ -140,5 +153,5 @@ async function upload(){
 
 $$('nav button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 $('#q').oninput=renderOrders;$('#branch').onchange=renderOrders;$('#proposal').onclick=runProposal;$('#refreshPlan').onclick=runProposal;$('#upload').onclick=upload;
-$('#saveDepots').onclick=saveDepots;$('#geocodeBtn').onclick=geocodeAll;$('#mapProposalBtn').onclick=runMapProposal;$('.close').onclick=()=>$('#detail').close();
+$('#saveDepots').onclick=saveDepots;$('#geocodeBtn').onclick=geocodeAll;$('#retryQuotaBtn').onclick=retryQuota;$('#mapProposalBtn').onclick=runMapProposal;$('.close').onclick=()=>$('#detail').close();
 refresh().catch(e=>{$('#mode').textContent='Chưa sẵn sàng';document.body.insertAdjacentHTML('afterbegin',`<div style="padding:10px;background:#fff0d6;color:#7a4c00">${esc(e.message)}</div>`)});
