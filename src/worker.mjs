@@ -74,17 +74,23 @@ async function mapDiagnostics(env){
 async function mapStatus(env){
   const s=await loadState(env),configs=await getMapConfig(env),nowIso=now(),serviceDate=s.orders[0]?.service_date||null;
   const eligible=s.orders.filter(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát');
-  let geocoded=0,failed=0;
+  let geocoded=0,failed=0,quotaBlocked=0;
   if(serviceDate){
-    const g=await env.DB.prepare('SELECT order_id,geocode_status,expires_at FROM order_geocodes WHERE service_date=?').bind(serviceDate).all();
-    const ok=new Set(),bad=new Set();
-    for(const x of g.results||[]){if(x.geocode_status==='ok'&&x.expires_at&&x.expires_at>nowIso)ok.add(Number(x.order_id));else if(x.geocode_status==='error')bad.add(Number(x.order_id));}
-    geocoded=eligible.filter(o=>ok.has(Number(o.id))).length;failed=eligible.filter(o=>bad.has(Number(o.id))).length;
+    const g=await env.DB.prepare('SELECT order_id,geocode_status,error_text,expires_at FROM order_geocodes WHERE service_date=?').bind(serviceDate).all();
+    const ok=new Set(),bad=new Set(),quota=new Set();
+    for(const x of g.results||[]){
+      if(x.geocode_status==='ok'&&x.expires_at&&x.expires_at>nowIso)ok.add(Number(x.order_id));
+      else if(x.geocode_status==='error'){bad.add(Number(x.order_id));if(String(x.error_text||'').startsWith('GEOCODE_API_429'))quota.add(Number(x.order_id));}
+    }
+    geocoded=eligible.filter(o=>ok.has(Number(o.id))).length;
+    failed=eligible.filter(o=>bad.has(Number(o.id))).length;
+    quotaBlocked=eligible.filter(o=>quota.has(Number(o.id))).length;
   }
   const depotStatus=configs.map(x=>({branch:x.branch,address:x.depot_address,geocoded:activeCache(x),status:x.geocode_status}));
   const requiredBranches=[...new Set(eligible.map(o=>o.branch))];
   const depotsReady=requiredBranches.every(b=>depotStatus.some(x=>x.branch===b&&x.geocoded));
-  return {provider:'google_maps_platform',apiConfigured:Boolean(env.GOOGLE_MAPS_API_KEY),serviceDate,eligibleOrders:eligible.length,geocodedOrders:geocoded,failedOrders:failed,depots:depotStatus,routeReady:Boolean(env.GOOGLE_MAPS_API_KEY)&&depotsReady&&(geocoded+failed===eligible.length)&&eligible.length>0};
+  const completed=geocoded+failed;
+  return {provider:'google_maps_platform',apiConfigured:Boolean(env.GOOGLE_MAPS_API_KEY),serviceDate,eligibleOrders:eligible.length,geocodedOrders:geocoded,failedOrders:failed,quotaBlockedOrders:quotaBlocked,pendingOrders:Math.max(0,eligible.length-completed),depots:depotStatus,routeReady:Boolean(env.GOOGLE_MAPS_API_KEY)&&depotsReady&&completed===eligible.length&&quotaBlocked===0&&eligible.length>0};
 }
 async function saveMapConfig(env,p){
   const at=now(),rows=[['HCM',p.hcmDepot],['Hà Nội',p.hnDepot]].filter(x=>String(x[1]||'').trim());
@@ -92,6 +98,16 @@ async function saveMapConfig(env,p){
   const stmts=rows.map(([branch,address])=>env.DB.prepare(`INSERT INTO map_config(branch,depot_address,geocode_status,updated_at) VALUES(?,?,'pending',?) ON CONFLICT(branch) DO UPDATE SET depot_address=excluded.depot_address,depot_place_id=NULL,depot_lat=NULL,depot_lng=NULL,geocode_status='pending',geocode_fetched_at=NULL,geocode_expires_at=NULL,updated_at=excluded.updated_at`).bind(branch,String(address).trim(),at));
   await env.DB.batch(stmts);return {ok:true,branches:rows.map(x=>x[0])};
 }
+
+async function retryQuotaGeocodes(env){
+  const serviceDate=(await mapStatus(env)).serviceDate;
+  if(!serviceDate)return {ok:true,reset:0,status:await mapStatus(env)};
+  const count=await env.DB.prepare(`SELECT COUNT(*) c FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND error_text LIKE 'GEOCODE_API_429%'`).bind(serviceDate).first();
+  const reset=Number(count?.c||0);
+  if(reset)await env.DB.prepare(`DELETE FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND error_text LIKE 'GEOCODE_API_429%'`).bind(serviceDate).run();
+  return {ok:true,reset,status:await mapStatus(env)};
+}
+
 async function geocodeStep(env){
   const apiKey=mapsKey(env),at=now(),exp=plusHours(at,MAP_POLICY.geocodeTtlHours),configs=await getMapConfig(env);
   let processed=0,success=0,failed=0;
@@ -219,6 +235,7 @@ export default {async fetch(request,env){
       if(request.method==='POST'&&u.pathname==='/api/import/workbook'){requireAdmin(user);return json(await importWorkbook(env,user.email,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/config'){requireAdmin(user);return json(await saveMapConfig(env,await request.json()));}
       if(request.method==='POST'&&u.pathname==='/api/map/geocode-step'){requireAdmin(user);return json(await geocodeStep(env));}
+      if(request.method==='POST'&&u.pathname==='/api/map/retry-quota'){requireAdmin(user);return json(await retryQuotaGeocodes(env));}
       if(request.method==='POST'&&u.pathname==='/api/dispatch/map/start'){requireAdmin(user);return json(await startMapProposal(env,user.email));}
       if(request.method==='POST'&&u.pathname==='/api/dispatch/map/step'){requireAdmin(user);const p=await request.json();return json(await stepMapProposal(env,Number(p.runId)));}
       if(request.method==='POST'&&u.pathname==='/api/dispatch/proposals'){requireAdmin(user);return json(await propose(env,user.email));}
