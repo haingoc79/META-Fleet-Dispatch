@@ -1,0 +1,2 @@
+import fs from 'node:fs';import path from 'node:path';
+const out=path.resolve(import.meta.dirname,'public'),vendor=path.join(out,'vendor');fs.mkdirSync(vendor,{recursive:true});const xlsx=path.join(import.meta.dirname,'node_modules/xlsx/dist/xlsx.full.min.js');if(fs.existsSync(xlsx))fs.copyFileSync(xlsx,path.join(vendor,'xlsx.full.min.js'));else console.warn('xlsx dependency not installed locally; production build installs it before this step.');
