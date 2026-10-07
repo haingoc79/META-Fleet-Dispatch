@@ -47,11 +47,15 @@ function plusHours(iso,h){return new Date(new Date(iso).getTime()+h*3600000).toI
 function activeCache(row){const exp=row?.expires_at||row?.geocode_expires_at;return Boolean(row&&row.geocode_status==='ok'&&exp&&new Date(exp)>new Date());}
 async function googleGeocode(apiKey,address){
   const q=encodeURIComponent(String(address||'').trim()+', Việt Nam');
-  const res=await fetch(`https://geocode.googleapis.com/v4/geocode/address/${q}?languageCode=vi&regionCode=vn`,{headers:{'X-Goog-Api-Key':apiKey,'X-Goog-FieldMask':'results.placeId,results.location,results.granularity'}});
-  if(!res.ok)throw new Error(`GEOCODE_API_${res.status}:${(await res.text()).slice(0,2000)}`);
-  const body=await res.json(),x=body?.results?.[0];
-  if(!x?.placeId||x?.location?.latitude==null||x?.location?.longitude==null)throw new Error('GEOCODE_NO_RESULT');
-  return {placeId:x.placeId,lat:Number(x.location.latitude),lng:Number(x.location.longitude),granularity:x.granularity||null};
+  const url=`https://maps.googleapis.com/maps/api/geocode/json?address=${q}&language=vi&region=vn&key=${encodeURIComponent(apiKey)}`;
+  const res=await fetch(url);
+  if(!res.ok)throw new Error(`GEOCODE_HTTP_${res.status}:${(await res.text()).slice(0,1200)}`);
+  const body=await res.json();
+  if(body?.status==='ZERO_RESULTS')throw new Error('GEOCODE_ZERO_RESULTS');
+  if(body?.status!=='OK')throw new Error(`GEOCODE_V3_${body?.status||'UNKNOWN'}:${String(body?.error_message||'').slice(0,1000)}`);
+  const x=body?.results?.[0],loc=x?.geometry?.location;
+  if(!x?.place_id||loc?.lat==null||loc?.lng==null)throw new Error('GEOCODE_NO_RESULT');
+  return {placeId:x.place_id,lat:Number(loc.lat),lng:Number(loc.lng),granularity:x.geometry?.location_type||null,provider:'google_geocoding_v3'};
 }
 async function getMapConfig(env){const r=await env.DB.prepare('SELECT * FROM map_config ORDER BY branch').all();return r.results||[];}
 
@@ -61,9 +65,9 @@ async function providerDiagnostic(env){
   const sample=s.orders.find(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát')||s.orders[0];
   if(!sample)throw Object.assign(new Error('NO_ORDER_SAMPLE'),{status:404});
   const q=encodeURIComponent(String(sample.full_address||'').trim()+', Việt Nam');
-  const res=await fetch(`https://geocode.googleapis.com/v4/geocode/address/${q}?languageCode=vi&regionCode=vn`,{headers:{'X-Goog-Api-Key':apiKey,'X-Goog-FieldMask':'results.placeId,results.location,results.granularity'}});
+  const res=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${q}&language=vi&region=vn&key=${encodeURIComponent(apiKey)}`);
   const body=await res.text();
-  return {httpStatus:res.status,ok:res.ok,orderId:sample.id,branch:sample.branch,response:body.slice(0,4000)};
+  return {provider:'google_geocoding_v3',httpStatus:res.status,ok:res.ok,orderId:sample.id,branch:sample.branch,response:body.slice(0,4000)};
 }
 
 async function mapDiagnostics(env){
@@ -113,9 +117,9 @@ async function saveMapConfig(env,p){
 async function retryQuotaGeocodes(env){
   const serviceDate=(await mapStatus(env)).serviceDate;
   if(!serviceDate)return {ok:true,reset:0,status:await mapStatus(env)};
-  const count=await env.DB.prepare(`SELECT COUNT(*) c FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND error_text LIKE 'GEOCODE_API_429%'`).bind(serviceDate).first();
+  const count=await env.DB.prepare(`SELECT COUNT(*) c FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND (error_text LIKE 'GEOCODE_API_429%' OR error_text LIKE 'GEOCODE_V3_OVER_QUERY_LIMIT%' OR error_text LIKE 'GEOCODE_V3_OVER_DAILY_LIMIT%')`).bind(serviceDate).first();
   const reset=Number(count?.c||0);
-  if(reset)await env.DB.prepare(`DELETE FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND error_text LIKE 'GEOCODE_API_429%'`).bind(serviceDate).run();
+  if(reset)await env.DB.prepare(`DELETE FROM order_geocodes WHERE service_date=? AND geocode_status='error' AND (error_text LIKE 'GEOCODE_API_429%' OR error_text LIKE 'GEOCODE_V3_OVER_QUERY_LIMIT%' OR error_text LIKE 'GEOCODE_V3_OVER_DAILY_LIMIT%')`).bind(serviceDate).run();
   return {ok:true,reset,status:await mapStatus(env)};
 }
 
@@ -136,7 +140,7 @@ async function geocodeStep(env){
     catch(e){
       const msg=String(e.message||e);
       results.push({o,error:msg});
-      if(msg.startsWith('GEOCODE_API_429')){quotaHit=true;break;}
+      if(msg.startsWith('GEOCODE_API_429')||msg.startsWith('GEOCODE_V3_OVER_QUERY_LIMIT')||msg.startsWith('GEOCODE_V3_OVER_DAILY_LIMIT')){quotaHit=true;break;}
     }
   }
   const stmts=[];
