@@ -1,6 +1,17 @@
 {
-  "name":"meta-fleet-dispatch-cloudflare","private":true,"version":"0.5.0","type":"module",
-  "scripts":{"build":"node build.mjs","deploy":"npm run build && wrangler deploy","check":"node --check src/worker.mjs && node --check src/feasibility.mjs && node --check src/shadow-dispatch-v2.mjs"},
-  "dependencies":{"xlsx":"^0.18.5"},
-  "devDependencies":{"wrangler":"^4.102.0"}
+  "name": "meta-fleet-dispatch-cloudflare",
+  "private": true,
+  "version": "0.5.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "check": "node --check src/worker.mjs && node --check src/feasibility.mjs && node --check src/shadow-dispatch-v2.mjs && node --check src/map-routing.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "wrangler": "^4.102.0"
+  }
 }
