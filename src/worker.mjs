@@ -115,12 +115,19 @@ async function geocodeStep(env){
     if(activeCache(c))continue;
     try{const g=await googleGeocode(apiKey,c.depot_address);await env.DB.prepare(`UPDATE map_config SET depot_place_id=?,depot_lat=?,depot_lng=?,geocode_status='ok',geocode_fetched_at=?,geocode_expires_at=?,updated_at=? WHERE branch=?`).bind(g.placeId,g.lat,g.lng,at,exp,at,c.branch).run();success++;}catch(e){await env.DB.prepare(`UPDATE map_config SET geocode_status='error',updated_at=? WHERE branch=?`).bind(at,c.branch).run();failed++;}processed++;
   }
-  const s=await loadState(env),serviceDate=s.orders[0]?.service_date||null;if(!serviceDate)return {processed,success,failed,status:await mapStatus(env)};
+  const s=await loadState(env),serviceDate=s.orders[0]?.service_date||null;if(!serviceDate)return {processed,success,failed,quotaHit,status:await mapStatus(env)};
   const gr=await env.DB.prepare('SELECT * FROM order_geocodes WHERE service_date=?').bind(serviceDate).all(),gm=new Map((gr.results||[]).map(x=>[Number(x.order_id),x]));
   const candidates=s.orders.filter(o=>{if(o.assigned_driver_id!=null||(o.execution_state||'at_depot')!=='at_depot'||o.suggested_vehicle_type==='Cần rà soát')return false;const row=gm.get(Number(o.id));return !row||!row.expires_at||new Date(row.expires_at)<=new Date();}).slice(0,MAP_POLICY.geocodeBatch);
-  const results=await Promise.all(candidates.map(async o=>{
-    try{const g=await googleGeocode(apiKey,o.full_address);return {o,g};}catch(e){return {o,error:e.message};}
-  }));
+  const results=[];
+  let quotaHit=false;
+  for(const o of candidates){
+    try{const g=await googleGeocode(apiKey,o.full_address);results.push({o,g});}
+    catch(e){
+      const msg=String(e.message||e);
+      results.push({o,error:msg});
+      if(msg.startsWith('GEOCODE_API_429')){quotaHit=true;break;}
+    }
+  }
   const stmts=[];
   for(const x of results){processed++;if(x.g){success++;stmts.push(env.DB.prepare(`INSERT INTO order_geocodes(order_id,service_date,place_id,lat,lng,geocode_status,error_text,fetched_at,expires_at) VALUES(?,?,?,?,?,'ok',NULL,?,?) ON CONFLICT(order_id,service_date) DO UPDATE SET place_id=excluded.place_id,lat=excluded.lat,lng=excluded.lng,geocode_status='ok',error_text=NULL,fetched_at=excluded.fetched_at,expires_at=excluded.expires_at`).bind(x.o.id,serviceDate,x.g.placeId,x.g.lat,x.g.lng,at,exp));}else{failed++;stmts.push(env.DB.prepare(`INSERT INTO order_geocodes(order_id,service_date,geocode_status,error_text,fetched_at,expires_at) VALUES(?,?,'error',?,?,?) ON CONFLICT(order_id,service_date) DO UPDATE SET geocode_status='error',error_text=excluded.error_text,fetched_at=excluded.fetched_at,expires_at=excluded.expires_at`).bind(x.o.id,serviceDate,x.error||'GEOCODE_FAILED',at,exp));}}
   if(stmts.length)await env.DB.batch(stmts);
