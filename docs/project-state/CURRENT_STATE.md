@@ -13,22 +13,18 @@ Ngày: 2026-10-07
 
 ## Map-aware routing
 
-- Google key: configured.
-- Depot HCM/Hà Nội: geocode OK.
-- Eligible orders: 382.
-- Geocoded OK: 170.
-- Quota blocked: 80.
-- Pending: 132.
-- Other address errors: 0.
-- `routeReady=false`.
+- Worker đã chuyển sang **stable Google Geocoding API v3** thay cho v4 Preview.
+- Routes API giữ nguyên.
+- Depot HCM/Hà Nội: geocode OK từ dữ liệu cache trước.
+- Geocode state: 170 OK, 80 quota-blocked cũ, 132 pending.
+- Provider diagnostic bằng stable v3 hiện trả HTTP 200 nhưng payload:
+  - status = `REQUEST_DENIED`
+  - error = `You must enable Billing on the Google Cloud Project`
+- Project ID: `white-sign-510904-j5`
+- Project number: `675960534045`
+- Google key hiện dùng thuộc đúng project cũ.
+- Active blocker hiện tại: Billing của project chưa được Google Maps backend công nhận là enabled/linked.
 
-Full provider diagnostic từ Google:
-- consumer project number: `675960534045`;
-- quota metric: `geocoding-backend.googleapis.com/v4/geocode_address_requests`;
-- quota limit: `V4GeocodeAddressPerDayPerProject`;
-- quota limit value Google backend đang áp: `100`;
-- response: `429 RESOURCE_EXHAUSTED`.
+## Dispatch
 
-Google Cloud UI do user chụp đang hiển thị quota 1,500/day và usage 170. Chưa retry thêm cho tới khi xác minh project number và backend quota đã propagate.
-
-Latest route proposal 378 đơn/75 chuyến vẫn là heuristic cũ, không dùng làm route plan cuối.
+Latest 378-order / 75-trip result vẫn là heuristic cũ, không dùng làm route plan cuối.
