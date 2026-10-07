@@ -44,7 +44,7 @@ function mapsKey(env){
   return env.GOOGLE_MAPS_API_KEY;
 }
 function plusHours(iso,h){return new Date(new Date(iso).getTime()+h*3600000).toISOString();}
-function activeCache(row){return row&&row.geocode_status==='ok'&&row.expires_at&&new Date(row.expires_at)>new Date();}
+function activeCache(row){const exp=row?.expires_at||row?.geocode_expires_at;return Boolean(row&&row.geocode_status==='ok'&&exp&&new Date(exp)>new Date());}
 async function googleGeocode(apiKey,address){
   const q=encodeURIComponent(String(address||'').trim()+', Việt Nam');
   const res=await fetch(`https://geocode.googleapis.com/v4/geocode/address/${q}?languageCode=vi&regionCode=vn`,{headers:{'X-Goog-Api-Key':apiKey,'X-Goog-FieldMask':'results.placeId,results.location,results.granularity'}});
