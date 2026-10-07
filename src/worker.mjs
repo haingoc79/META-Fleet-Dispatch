@@ -67,7 +67,7 @@ async function mapStatus(env){
   const depotStatus=configs.map(x=>({branch:x.branch,address:x.depot_address,geocoded:activeCache(x),status:x.geocode_status}));
   const requiredBranches=[...new Set(eligible.map(o=>o.branch))];
   const depotsReady=requiredBranches.every(b=>depotStatus.some(x=>x.branch===b&&x.geocoded));
-  return {provider:'google_maps_platform',apiConfigured:Boolean(env.GOOGLE_MAPS_API_KEY),serviceDate,eligibleOrders:eligible.length,geocodedOrders:geocoded,failedOrders:failed,depots:depotStatus,routeReady:Boolean(env.GOOGLE_MAPS_API_KEY)&&depotsReady&&geocoded===eligible.length};
+  return {provider:'google_maps_platform',apiConfigured:Boolean(env.GOOGLE_MAPS_API_KEY),serviceDate,eligibleOrders:eligible.length,geocodedOrders:geocoded,failedOrders:failed,depots:depotStatus,routeReady:Boolean(env.GOOGLE_MAPS_API_KEY)&&depotsReady&&(geocoded+failed===eligible.length)&&eligible.length>0};
 }
 async function saveMapConfig(env,p){
   const at=now(),rows=[['HCM',p.hcmDepot],['Hà Nội',p.hnDepot]].filter(x=>String(x[1]||'').trim());
@@ -84,7 +84,7 @@ async function geocodeStep(env){
   }
   const s=await loadState(env),serviceDate=s.orders[0]?.service_date||null;if(!serviceDate)return {processed,success,failed,status:await mapStatus(env)};
   const gr=await env.DB.prepare('SELECT * FROM order_geocodes WHERE service_date=?').bind(serviceDate).all(),gm=new Map((gr.results||[]).map(x=>[Number(x.order_id),x]));
-  const candidates=s.orders.filter(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát'&&!activeCache(gm.get(Number(o.id)))).slice(0,MAP_POLICY.geocodeBatch);
+  const candidates=s.orders.filter(o=>{if(o.assigned_driver_id!=null||(o.execution_state||'at_depot')!=='at_depot'||o.suggested_vehicle_type==='Cần rà soát')return false;const row=gm.get(Number(o.id));return !row||!row.expires_at||new Date(row.expires_at)<=new Date();}).slice(0,MAP_POLICY.geocodeBatch);
   const results=await Promise.all(candidates.map(async o=>{
     try{const g=await googleGeocode(apiKey,o.full_address);return {o,g};}catch(e){return {o,error:e.message};}
   }));
@@ -103,8 +103,10 @@ async function mapData(env,orders){
 async function startMapProposal(env,user){
   mapsKey(env);const status=await mapStatus(env);if(!status.routeReady)throw Object.assign(new Error('MAP_NOT_READY'),{status:409});
   const s=await loadState(env),md=await mapData(env,s.orders),plan=buildSpatialRouteJobs({orders:s.orders,drivers:s.drivers,policy:POLICY,geocodes:md.geocodes,depots:md.depots}),at=now();
+  const missing=s.orders.filter(o=>o.assigned_driver_id==null&&(o.execution_state||'at_depot')==='at_depot'&&o.suggested_vehicle_type!=='Cần rà soát'&&!md.geocodes.has(Number(o.id))).map(o=>({orderId:o.id,reasons:['MAP_GEOCODE_FAILED_OR_MISSING']}));
+  plan.blocked.push(...missing);
   const scope={branches:['HCM','Hà Nội'],provider:'google_maps_platform',cluster:'spatial_bearing_v1',blocked:plan.blocked,unassigned:plan.unassigned};
-  const run=await env.DB.prepare(`INSERT INTO dispatch_runs(actor,scope_json,algorithm_version,status,input_count,proposal_count,created_at) VALUES(?,?,'shadow_map_google_routes_v1','map_building',?,0,?) RETURNING id`).bind(user,JSON.stringify(scope),plan.inputCount,at).first();
+  const run=await env.DB.prepare(`INSERT INTO dispatch_runs(actor,scope_json,algorithm_version,status,input_count,proposal_count,created_at) VALUES(?,?,'shadow_map_google_routes_v1','map_building',?,0,?) RETURNING id`).bind(user,JSON.stringify(scope),status.eligibleOrders,at).first();
   const stmts=plan.jobs.map(j=>env.DB.prepare(`INSERT INTO map_route_jobs(run_id,route_id,vehicle_id,vehicle_type,driver_id,trip_index,branch,order_ids_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'pending',?,?)`).bind(run.id,j.routeId,j.vehicle.id,j.vehicle.type,j.driver.id,j.tripIndex,j.vehicle.branch,JSON.stringify(j.orders.map(o=>o.id)),at,at));
   for(let i=0;i<stmts.length;i+=50)await env.DB.batch(stmts.slice(i,i+50));
   return {runId:run.id,jobs:plan.jobs.length,inputCount:plan.inputCount,blocked:plan.blocked,unassigned:plan.unassigned};
@@ -119,12 +121,12 @@ async function stepMapProposal(env,runId){
     try{
       const ids=JSON.parse(job.order_ids_json),orders=ids.map(id=>omap.get(Number(id))).filter(Boolean),depot=md.depots.get(job.branch);if(!depot)throw new Error('DEPOT_MISSING');
       const points=[depot,...orders.map(o=>md.geocodes.get(Number(o.id)))];if(points.some(x=>!x?.placeId))throw new Error('GEOCODE_MISSING');
-      let startAt=defaultRouteStart(orders[0]?.service_date||status?.serviceDate||new Date().toISOString().slice(0,10),POLICY);
+      let startAt=defaultRouteStart(orders[0]?.service_date||new Date().toISOString().slice(0,10),POLICY);
       if(job.trip_index===1&&new Date(startAt)<new Date())startAt=new Date().toISOString();
       if(job.trip_index>1){const prev=await env.DB.prepare(`SELECT metrics_json FROM map_route_jobs WHERE run_id=? AND vehicle_id=? AND trip_index<? AND status='done' ORDER BY trip_index DESC LIMIT 1`).bind(runId,job.vehicle_id,job.trip_index).first();if(prev?.metrics_json)startAt=nextTripStart(JSON.parse(prev.metrics_json).plannedEnd);}
       const matrix=await fetchRouteMatrix({apiKey,placeIds:points.map(x=>x.placeId),vehicleType:job.vehicle_type,departureTime:startAt});
       const seq=optimizeMatrixSequence(matrix),metrics=routeMetrics({seq,matrix,startAt,serviceMinutes:Number(POLICY.service_minutes[job.vehicle_type]||10)}),at=now(),proposals=[];
-      for(const stop of metrics.stops){const o=orders[stop.nodeIndex-1];if(!o)continue;proposals.push(env.DB.prepare(`INSERT INTO dispatch_proposals(run_id,order_id,driver_id,vehicle_id,vehicle_type,route_id,trip_index,sequence_no,planned_arrival,planned_departure,feasibility_status,reason,score_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'review_required',?,?,?)`).bind(runId,o.id,job.driver_id,job.vehicle_id,job.vehicle_type,job.route_id,job.trip_index,stop.sequence,stop.arrival,stop.departure,`Map-aware: Google Routes ${matrix.travelMode}; spatial cluster + road-time matrix. Capacity/SLA vẫn có assumptions chưa xác minh.`,JSON.stringify({provider:'google_routes_v2',distance_km:metrics.distanceKm,travel_minutes:metrics.travelMinutes,leg_km:Number((stop.legMeters/1000).toFixed(2)),leg_minutes:Math.round(stop.legSeconds/60),map_mode_fallback:matrix.fallback,product_names:(o.products||[]).map(p=>p.model_name)}),at));}
+      for(const stop of metrics.stops){const o=orders[stop.nodeIndex-1];if(!o)continue;proposals.push(env.DB.prepare(`INSERT INTO dispatch_proposals(run_id,order_id,driver_id,vehicle_id,vehicle_type,route_id,trip_index,sequence_no,planned_arrival,planned_departure,feasibility_status,reason,score_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'review_required',?,?,?)`).bind(runId,o.id,job.driver_id,job.vehicle_id,job.vehicle_type,job.route_id,job.trip_index,stop.sequence,stop.arrival,stop.departure,`Map-aware: Google Routes ${matrix.travelMode}; spatial cluster + road-time matrix. Capacity/SLA vẫn có assumptions chưa xác minh.`,JSON.stringify({provider:'google_routes_v2',distance_km:metrics.distanceKm,travel_minutes:metrics.travelMinutes,leg_km:Number((stop.legMeters/1000).toFixed(2)),leg_minutes:Math.round(stop.legSeconds/60),map_mode_fallback:matrix.fallback,product_names:(o.products||[]).map(p=>p.model_name)}),at));}
       for(let i=0;i<proposals.length;i+=40)await env.DB.batch(proposals.slice(i,i+40));
       await env.DB.prepare(`UPDATE map_route_jobs SET status='done',metrics_json=?,updated_at=? WHERE id=?`).bind(JSON.stringify({...metrics,mapFallback:matrix.fallback,travelMode:matrix.travelMode}),at,job.id).run();
     }catch(e){await env.DB.prepare(`UPDATE map_route_jobs SET status='error',error_text=?,updated_at=? WHERE id=?`).bind(String(e.message||e).slice(0,500),now(),job.id).run();}
