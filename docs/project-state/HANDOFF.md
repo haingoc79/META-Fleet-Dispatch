@@ -1,39 +1,22 @@
 # HANDOFF
 
-## Trạng thái
+## Current blocker
 
-Production app live, Access/D1/import/RBAC PASS.
-Tên sản phẩm đã live.
-Map-aware code đã deploy và CI PASS nhưng chưa có Google Maps key/depot nên chưa gọi dữ liệu bản đồ thật.
+Google Geocoding v4 daily quota đã hết sau 170/382 order geocodes.
+212 order còn lại đều `GEOCODE_API_429`; không có lỗi địa chỉ khác được ghi nhận.
 
-## Việc cần cấu hình ngoài AI
+## User action
 
-1. Google Cloud:
-   - bật billing cho project;
-   - enable **Geocoding API**;
-   - enable **Routes API**;
-   - tạo API key và restrict key chỉ cho 2 API này.
-2. Cloudflare Worker `meta-fleet-dispatch`:
-   - Settings → Variables and secrets → Add variable;
-   - type = Secret;
-   - name = `GOOGLE_MAPS_API_KEY`;
-   - value = API key;
-   - Deploy.
-3. `giaohang.meta.shopping` → **Bản đồ & tuyến**:
-   - nhập địa chỉ điểm xuất phát HCM;
-   - nhập địa chỉ điểm xuất phát Hà Nội;
-   - Lưu điểm xuất phát;
-   - Chuẩn hóa địa chỉ.
-4. Chỉ khi `routeReady=true`: chạy **Tối ưu theo bản đồ**.
+Google Cloud project `white-sign-510904-j5`:
+1. Google Maps Platform → Quotas.
+2. Chọn Geocoding API.
+3. Tăng `v4 GeocodeAddress requests per day` đủ cho daily volume + retry headroom.
+4. Nên dùng daily cap/cost alert thay vì quota quá thấp.
 
-## Acceptance sau cấu hình
+## Sau khi quota tăng
 
-- geocode count + failures;
-- outlier/review orders;
-- route matrix errors;
-- route km/min;
-- route không zig-zag bất hợp lý;
-- 2-wheel/drive mode;
-- assignment counts/COD/products;
-- so sánh với heuristic baseline;
-- chỉ sau đó mới cân nhắc commit assignment.
+1. `giaohang.meta.shopping` → Bản đồ & tuyến.
+2. Bấm **Retry đơn bị quota**.
+3. Không chạy lại 170 đơn đã thành công.
+4. Khi `Quota blocked=0`, audit geocode/outlier.
+5. Chỉ khi `routeReady=true` mới chạy **Tối ưu theo bản đồ**.
