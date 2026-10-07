@@ -20,11 +20,18 @@ async function schema(env){
   return schemaReady;
 }
 
-function actor(request,env){
-  if(env.MFD_ALLOW_UNAUTHENTICATED==='true') return 'Preview';
-  const email=request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email');
-  if(!email) throw Object.assign(new Error('ACCESS_REQUIRED'),{status:401});
-  return email;
+function accessContext(request,env){
+  if(env.MFD_ALLOW_UNAUTHENTICATED==='true') return {email:'preview@local',role:'admin',viewerDomain:'local'};
+  const raw=request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email');
+  if(!raw) throw Object.assign(new Error('ACCESS_REQUIRED'),{status:401});
+  const email=String(raw).trim().toLowerCase();
+  const viewerDomain=String(env.MFD_VIEWER_DOMAIN||'meta.vn').trim().toLowerCase();
+  if(!email.endsWith('@'+viewerDomain)) throw Object.assign(new Error('EMAIL_DOMAIN_DENIED'),{status:403});
+  const admins=new Set(String(env.MFD_ADMIN_EMAILS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean));
+  return {email,role:admins.has(email)?'admin':'viewer',viewerDomain};
+}
+function requireAdmin(user){
+  if(user.role!=='admin') throw Object.assign(new Error('READ_ONLY_USER'),{status:403});
 }
 function index(headers){const m={};(headers||[]).forEach((h,i)=>m[String(h||'').trim()]=i);return m;}
 function weight(v){if(v==null||v==='')return null;if(typeof v==='number')return null;const m=String(v).trim().toLowerCase().replace(',','.').match(/^([0-9]+(?:\.[0-9]+)?)\s*(kg|g)$/);return m?(m[2]==='g'?Number(m[1])/1000:Number(m[1])):null;}
@@ -64,7 +71,7 @@ async function loadState(env){
   const drivers=(dr.results||[]).map(r=>JSON.parse(r.payload_json));return {orders,drivers};
 }
 async function latestRun(env){const run=await env.DB.prepare(`SELECT * FROM dispatch_runs ORDER BY id DESC LIMIT 1`).first();if(!run)return null;const p=await env.DB.prepare(`SELECT * FROM dispatch_proposals WHERE run_id=? ORDER BY route_id,sequence_no`).bind(run.id).all();return {...run,proposals:(p.results||[]).map(x=>({...x,score:JSON.parse(x.score_json)}))};}
-async function bootstrap(env){const s=await loadState(env);return {...s,latestRun:await latestRun(env),policy:{version:POLICY.policy_version,capacity:'unverified_assumption',travel:'unverified_heuristic',sla:'unverified_workday'}};}
+async function bootstrap(env,user){const s=await loadState(env);return {...s,currentUser:{email:user.email,role:user.role,canWrite:user.role==='admin'},latestRun:await latestRun(env),policy:{version:POLICY.policy_version,capacity:'unverified_assumption',travel:'unverified_heuristic',sla:'unverified_workday'}};}
 
 async function propose(env,user){
   const s=await loadState(env),plan=buildAdvancedShadowPlan({orders:s.orders,drivers:s.drivers,policy:POLICY,branches:['HCM','Hà Nội'],vehicles:buildPlanningVehicles(POLICY,['HCM','Hà Nội'])}),at=now();
@@ -84,7 +91,14 @@ async function manualAssign(env,user,p){
 
 export default {async fetch(request,env){
   try{await schema(env);const u=new URL(request.url);if(u.pathname==='/healthz')return json({ok:true,service:'meta-fleet-dispatch',persistence:'cloudflare-d1',time:now()});
-    if(u.pathname.startsWith('/api/')){const user=actor(request,env);if(request.method==='GET'&&u.pathname==='/api/bootstrap')return json(await bootstrap(env));if(request.method==='POST'&&u.pathname==='/api/import/workbook')return json(await importWorkbook(env,user,await request.json()));if(request.method==='POST'&&u.pathname==='/api/dispatch/proposals')return json(await propose(env,user));if(request.method==='POST'&&u.pathname==='/api/assignments')return json(await manualAssign(env,user,await request.json()));return json({error:'NOT_FOUND'},404);}
+    if(u.pathname.startsWith('/api/')){
+      const user=accessContext(request,env);
+      if(request.method==='GET'&&u.pathname==='/api/bootstrap') return json(await bootstrap(env,user));
+      if(request.method==='POST'&&u.pathname==='/api/import/workbook'){requireAdmin(user);return json(await importWorkbook(env,user.email,await request.json()));}
+      if(request.method==='POST'&&u.pathname==='/api/dispatch/proposals'){requireAdmin(user);return json(await propose(env,user.email));}
+      if(request.method==='POST'&&u.pathname==='/api/assignments'){requireAdmin(user);return json(await manualAssign(env,user.email,await request.json()));}
+      return json({error:'NOT_FOUND'},404);
+    }
     return env.ASSETS.fetch(request);
   }catch(e){return json({error:e.message||'INTERNAL_ERROR'},e.status||500);}
 }};
