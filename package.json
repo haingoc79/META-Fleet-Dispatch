@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "deploy": "npm run build && wrangler deploy",
-    "check": "node --check src/worker.mjs && node --check src/feasibility.mjs && node --check src/shadow-dispatch-v2.mjs && node --check src/map-routing.mjs && node --check public/app.js"
+    "check": "node --check src/worker.mjs && node --check src/feasibility.mjs && node --check src/shadow-dispatch-v2.mjs && node --check src/map-routing.mjs && node --check public/app.js && node tests/map-routing.test.mjs"
   },
   "dependencies": {
     "xlsx": "^0.18.5"
