@@ -5,30 +5,24 @@ Ngày: 2026-10-07
 ## Trạng thái production
 
 - GitHub Source of Truth: `haingoc79/META-Fleet-Dispatch`.
-- Runtime: Cloudflare Workers + Static Assets + D1.
+- Runtime: Cloudflare Workers + Static Assets + D1 + Cloudflare Access.
 - Worker: `meta-fleet-dispatch`.
 - D1 production: `meta-fleet-dispatch-prod`.
-- D1 UUID: `0467fc36-a689-40bf-92db-21db69c0f26c`.
 - Custom domain: `https://giaohang.meta.shopping`.
+- GitHub CI: PASS.
 - Cloudflare build/deploy: PASS.
-- Worker Version ID: `bfe90d26-9b1e-4ef3-be66-e28b0f67ce88`.
-- `/healthz`: PASS, persistence=`cloudflare-d1`.
-- Unauthenticated `/api/bootstrap`: blocked with `ACCESS_REQUIRED`.
-- Cloudflare Access: CHƯA BẬT; dashboard ghi rõ "This Worker is not protected by Access".
-- Workbook thật: CHƯA NẠP vào D1.
-- Shadow production trên D1: CHƯA CHẠY.
+- Production Worker version: `acb6d069-24e0-4d5e-9199-a02e065462a8`.
+- Cloudflare Access: PASS — All traffic, Allow email domain `@meta.vn`.
+- Session duration: 24 hours.
+- Admin/Dispatcher verified live: `ngochai@meta.vn`.
+- Configured Admin/Dispatcher: `ducthang@meta.vn`, `anhtuan@meta.vn`, `ngochai@meta.vn`, `bichthuy@meta.vn`.
+- Other `@meta.vn`: Viewer by Worker RBAC; UI read-only. Live viewer negative-write test chưa chạy.
+- `/healthz`: PASS.
+- D1 hiện trống: 0 orders trước production import.
+- Workbook thật: CHƯA NẠP.
+- Production shadow dispatch: CHƯA CHẠY.
 - Chưa PILOT READY.
 
-## Source hiện có
+## Bước kế tiếp
 
-- COD bắt buộc cho mọi đơn.
-- Import workbook browser-side vào D1.
-- Feasibility engine.
-- Shadow dispatch v2.
-- UI Kết quả phân đơn theo nhân sự → chuyến → stop → order.
-- D1 persistence.
-- GitHub CI syntax/build PASS.
-
-## Local block hiện tại
-
-Không được nạp PII thật cho tới khi Cloudflare Access được bật và kiểm chứng.
+Nạp workbook ngày 2026-10-07 bằng tài khoản Admin, kiểm import counts/COD/data-quality, sau đó chạy shadow dispatch production và acceptance.
