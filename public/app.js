@@ -127,7 +127,15 @@ async function geocodeAll(){
       if(r.quotaHit){$('#mapProgress').textContent=`Google Geocoding vẫn trả 429. Dừng retry để tránh gọi thừa. Hiện geocoded ${s.geocodedOrders}/${s.eligibleOrders}; quota blocked ${s.quotaBlockedOrders||0}.`;break;}
       if(!r.processed)break;
     }
-    state.mapStatus=s;renderMap();$('#mapProgress').textContent=`Geocode hoàn tất: ${s.geocodedOrders}/${s.eligibleOrders}; lỗi ${s.failedOrders}. ${s.routeReady?'Có thể tối ưu theo bản đồ.':'Kiểm tra API/depot/các địa chỉ lỗi.'}`;
+    state.mapStatus=s;renderMap();
+    if((s.quotaBlockedOrders||0)>0){
+      $('#mapProgress').textContent=`Geocode tạm dừng do Google quota: ${s.geocodedOrders}/${s.eligibleOrders} thành công; quota blocked ${s.quotaBlockedOrders}; pending ${s.pendingOrders||0}. Không chạy tối ưu tuyến.`;
+    }else if((s.pendingOrders||0)>0){
+      $('#mapProgress').textContent=`Geocode chưa hoàn tất: ${s.geocodedOrders}/${s.eligibleOrders}; còn pending ${s.pendingOrders}. Có thể bấm Chuẩn hóa địa chỉ để tiếp tục.`;
+    }else{
+      const realErrors=Math.max(0,(s.failedOrders||0)-(s.quotaBlockedOrders||0));
+      $('#mapProgress').textContent=`Geocode hoàn tất: ${s.geocodedOrders}/${s.eligibleOrders}; lỗi địa chỉ khác ${realErrors}. ${s.routeReady?'Có thể audit trước khi tối ưu theo bản đồ.':'Chưa route-ready.'}`;
+    }
   }catch(e){$('#mapProgress').textContent='Lỗi geocode: '+e.message;}finally{$('#geocodeBtn').disabled=false;}
 }
 async function runMapProposal(){
