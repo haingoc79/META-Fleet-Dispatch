@@ -8,43 +8,34 @@ Ngày: 2026-10-07
 - Runtime: Cloudflare Workers + Static Assets + D1 + Cloudflare Access.
 - Domain: `https://giaohang.meta.shopping`.
 - D1: `meta-fleet-dispatch-prod`.
-- Access: `@meta.vn` được vào; 4 Admin/Dispatcher được phép ghi, các tài khoản còn lại Viewer.
-- Workbook production đã nạp.
-- UI đang có 401 đơn, 44 nhân sự; tên sản phẩm được hiển thị ở bảng đơn và từng stop.
-- COD bắt buộc cho mọi đơn; amount hiện derived từ UnitCost.
-
-## Dispatch hiện tại
-
-- Latest legacy/shadow result: 378 đơn / 75 chuyến / 33 nhân sự có proposal.
-- Kết quả trên là `heuristic` cũ, CHƯA dùng đường bộ thật và không được coi là route plan cuối.
-- Đã quan sát tuyến ngược/xa trong heuristic cũ; ví dụ có route ghép nhiều quận/huyện không hợp lý.
+- Workbook production đã nạp: 401 đơn.
+- Tên sản phẩm đã live trong bảng đơn và từng stop.
+- Access/RBAC: `@meta.vn` viewer; 4 Admin/Dispatcher có write.
 
 ## Map-aware routing
 
-Đã deploy code:
-- tab **Bản đồ & tuyến**;
-- Google Maps provider abstraction;
-- geocode batch theo ngày;
-- spatial clustering theo tọa độ + hướng so với depot;
-- outlier review theo planning radius;
-- Google Routes Compute Route Matrix theo từng trip;
-- TWO_WHEELER cho xe máy, DRIVE cho ô tô; fallback được audit;
-- nearest-neighbor + 2-opt stop sequence trên road-time matrix;
-- route jobs chạy batch để tránh subrequest burst;
-- khoảng cách/phút mỗi chặng hiển thị ở Kết quả phân đơn;
-- geocode cache TTL 24h;
-- regression test map-routing PASS.
+- Google key: configured.
+- Depot HCM: `20A Cộng Hoà, Phường Bảy Hiền, TP HCM` — geocode OK.
+- Depot Hà Nội: `56 Duy Tân, Phường Cầu Giấy` — geocode OK.
+- Eligible orders: 382.
+- Geocoded OK: 170.
+- Quota blocked: 212.
+- Other geocode errors: 0.
+- Pending: 0.
+- `routeReady=false`.
 
-Production map status hiện tại:
-- provider: `google_maps_platform`
-- eligible orders: 382
-- geocoded: 0
-- failed: 0
-- `GOOGLE_MAPS_API_KEY`: chưa cấu hình
-- HCM depot: chưa cấu hình
-- Hà Nội depot: chưa cấu hình
-- routeReady: false
+Root cause của 212 failures: Google Geocoding API v4 trả `GEOCODE_API_429` do daily quota `v4 GeocodeAddress requests per day` đã hết.
 
-## Chưa PILOT READY
+Production đã có:
+- quota blocker phân biệt riêng với lỗi địa chỉ;
+- Admin diagnostics;
+- nút **Retry đơn bị quota**;
+- retry chỉ reset các record 429, giữ nguyên 170 geocode đã thành công.
 
-Map-aware production run chưa thể chạy cho tới khi key và 2 depot được cấu hình, sau đó phải kiểm geocode, map run, route quality và acceptance.
+## Dispatch
+
+Latest 378-order / 75-trip result vẫn là heuristic cũ và không được dùng làm route plan cuối.
+
+## Next
+
+Tăng Google Geocoding daily quota, retry 212 đơn, audit outlier/geocode, sau đó mới chạy Google Routes map-aware shadow.
