@@ -2,20 +2,25 @@
 
 ## Active blocker
 
-Google API key đang bị `429 RESOURCE_EXHAUSTED`.
+Stable Google Geocoding API v3 diagnostic trả:
 
-Provider diagnostic:
-- consumer: `projects/675960534045`;
-- quota: `V4GeocodeAddressPerDayPerProject`;
-- Google backend quota_limit_value: `100`.
+`REQUEST_DENIED: You must enable Billing on the Google Cloud Project`
 
-Cloud Console screenshot của user hiển thị:
-- `v4 GeocodeAddress requests per day` = 1,500;
-- current usage = 170.
+Project:
+- ID: `white-sign-510904-j5`
+- Number: `675960534045`
 
-## Không retry thêm cho tới khi xác minh
+## User action
 
-1. Kiểm Project info trong Google Cloud: Project number có phải `675960534045` hay không.
-2. Nếu đúng: chờ quota override propagate rồi kiểm provider diagnostic lại.
-3. Nếu khác: API key trong Cloudflare thuộc project khác; cần tạo/copy key đúng project hoặc tăng quota ở consumer project `675960534045`.
-4. Sau khi provider diagnostic không còn 429: retry quota records, rồi tiếp tục pending geocode.
+Google Cloud → Billing → Linked account cho đúng project:
+1. Link project với một active Billing Account.
+2. Xác nhận billing account ở trạng thái active.
+3. Không tạo key/project mới nữa.
+
+## Sau khi billing linked
+
+1. AI gọi `/api/map/provider-diagnostic`.
+2. Chỉ nếu response status = `OK` mới retry 80 quota-blocked.
+3. Sau đó tiếp tục 132 pending.
+4. Audit geocode/outlier.
+5. Chạy map-aware Google Routes shadow.
