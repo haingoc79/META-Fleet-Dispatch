@@ -124,6 +124,7 @@ async function geocodeAll(){
       const left=(s.eligibleOrders||0)-(s.geocodedOrders||0)-(s.failedOrders||0);if(left<=0)break;
       $('#mapProgress').textContent=`Đang geocode: ${s.geocodedOrders||0}/${s.eligibleOrders||0}; còn ${left}; lỗi ${s.failedOrders||0}.`;
       const r=await api('/api/map/geocode-step',{method:'POST',body:'{}'});s=r.status;
+      if(r.quotaHit){$('#mapProgress').textContent=`Google Geocoding vẫn trả 429. Dừng retry để tránh gọi thừa. Hiện geocoded ${s.geocodedOrders}/${s.eligibleOrders}; quota blocked ${s.quotaBlockedOrders||0}.`;break;}
       if(!r.processed)break;
     }
     state.mapStatus=s;renderMap();$('#mapProgress').textContent=`Geocode hoàn tất: ${s.geocodedOrders}/${s.eligibleOrders}; lỗi ${s.failedOrders}. ${s.routeReady?'Có thể tối ưu theo bản đồ.':'Kiểm tra API/depot/các địa chỉ lỗi.'}`;
