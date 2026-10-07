@@ -1,22 +1,21 @@
 # HANDOFF
 
-## Current blocker
+## Active blocker
 
-Google Geocoding v4 daily quota đã hết sau 170/382 order geocodes.
-212 order còn lại đều `GEOCODE_API_429`; không có lỗi địa chỉ khác được ghi nhận.
+Google API key đang bị `429 RESOURCE_EXHAUSTED`.
 
-## User action
+Provider diagnostic:
+- consumer: `projects/675960534045`;
+- quota: `V4GeocodeAddressPerDayPerProject`;
+- Google backend quota_limit_value: `100`.
 
-Google Cloud project `white-sign-510904-j5`:
-1. Google Maps Platform → Quotas.
-2. Chọn Geocoding API.
-3. Tăng `v4 GeocodeAddress requests per day` đủ cho daily volume + retry headroom.
-4. Nên dùng daily cap/cost alert thay vì quota quá thấp.
+Cloud Console screenshot của user hiển thị:
+- `v4 GeocodeAddress requests per day` = 1,500;
+- current usage = 170.
 
-## Sau khi quota tăng
+## Không retry thêm cho tới khi xác minh
 
-1. `giaohang.meta.shopping` → Bản đồ & tuyến.
-2. Bấm **Retry đơn bị quota**.
-3. Không chạy lại 170 đơn đã thành công.
-4. Khi `Quota blocked=0`, audit geocode/outlier.
-5. Chỉ khi `routeReady=true` mới chạy **Tối ưu theo bản đồ**.
+1. Kiểm Project info trong Google Cloud: Project number có phải `675960534045` hay không.
+2. Nếu đúng: chờ quota override propagate rồi kiểm provider diagnostic lại.
+3. Nếu khác: API key trong Cloudflare thuộc project khác; cần tạo/copy key đúng project hoặc tăng quota ở consumer project `675960534045`.
+4. Sau khi provider diagnostic không còn 429: retry quota records, rồi tiếp tục pending geocode.
